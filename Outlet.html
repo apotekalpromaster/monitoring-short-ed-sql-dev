@@ -1,0 +1,499 @@
+<script>
+/**
+ * Outlet.html (Final Revision Phase 2 - CSV Parser Fix)
+ * Fitur: Accordion Monitoring, Auto-Remark Display, Bulk CSV (Excel Safe & Space Fix), Scanner, Form Input.
+ */
+
+var App = App || {};
+
+App.outlet = {
+  productList: [],
+  monitoringData: [],
+  codeReader: null,
+  isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
+
+  // --- TEMPLATES ---
+  
+  templateDashboard: `
+    <div class="fade-in">
+      <div class="card text-center">
+        <h3 style="color: var(--primary-color);">Dashboard Outlet</h3>
+        <button class="btn-primary mt-2" style="padding: 20px; font-size: 1.2em;" onclick="App.outlet.handleScanClick()">📷 SCAN BARCODE</button>
+        <button class="btn-primary mt-2" style="background-color: #17a2b8; padding: 20px; font-size: 1.2em;" onclick="App.outlet.showFormManual()">📝 INPUT MANUAL</button>
+        <button class="btn-primary mt-2" style="background-color: var(--secondary-color); padding: 20px; font-size: 1.2em;" onclick="App.outlet.showMonitoring()">📊 MONITORING STOK</button>
+        <hr style="margin: 20px 0;">
+        <button class="btn-secondary" onclick="location.reload()">Keluar</button>
+      </div>
+    </div>
+  `,
+
+  templateMonitoring: `
+    <div class="fade-in">
+      <h3 style="color: var(--primary-color); margin-bottom: 15px;">Monitoring Stok Saya</h3>
+      
+      <!-- Search Bar -->
+      <div class="form-group">
+        <input type="text" id="monitoring-search" placeholder="Cari Nama Produk..." oninput="App.outlet.filterMonitoring()">
+      </div>
+
+      <!-- Action Buttons -->
+      <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+        <button class="btn-secondary" style="font-size: 0.8em; padding: 8px;" onclick="App.outlet.exportCsv()">⬇️ Download CSV</button>
+        <button class="btn-secondary" style="font-size: 0.8em; padding: 8px;" onclick="document.getElementById('csv-upload').click()">⬆️ Upload CSV</button>
+        <input type="file" id="csv-upload" accept=".csv" style="display:none" onchange="App.outlet.importCsv(this)">
+      </div>
+
+      <div id="monitoring-list">
+        <div class="text-center" style="padding: 40px;"><div class="spinner"></div> Memuat data...</div>
+      </div>
+
+      <!-- Save Changes Button (Sticky) -->
+      <button id="btn-save-changes" class="btn-primary mt-2" style="position: sticky; bottom: 70px; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); display: none;" onclick="App.outlet.saveBulkChanges()">
+        💾 Simpan Perubahan
+      </button>
+
+      <button class="btn-secondary mt-2" style="position: sticky; bottom: 20px; box-shadow: 0 -2px 10px rgba(0,0,0,0.1);" onclick="App.outlet.init()">
+        Kembali ke Menu
+      </button>
+    </div>
+  `,
+
+  templateCamera: `
+    <div class="fade-in">
+      <div class="card">
+        <h3>Scan Barcode (Kamera)</h3>
+        <div id="scanner-container" style="display:block;">
+          <video id="video-preview"></video>
+          <div class="scan-overlay"></div>
+        </div>
+        <p class="text-center text-muted">Arahkan kamera ke barcode produk</p>
+        <button class="btn-secondary mt-2" onclick="App.outlet.init()">Kembali ke Menu</button>
+      </div>
+    </div>
+  `,
+
+  templateHardwareScan: `
+    <div class="fade-in">
+      <div class="card text-center" style="padding: 40px;">
+        <h3 style="color: var(--primary-color);">Mode Scanner Fisik</h3>
+        <div style="font-size: 4em; margin: 20px;">📟</div>
+        <p>Silakan scan barcode menggunakan alat scanner Anda sekarang.</p>
+        <input type="text" id="hardware-input" style="opacity: 0; position: absolute; top: -1000px;" onblur="this.focus()" autofocus>
+        <div id="scan-status" style="margin-top: 20px; font-weight: bold; color: var(--success-color); min-height: 24px;"></div>
+        <button class="btn-secondary mt-2" onclick="App.outlet.init()">Kembali ke Menu</button>
+      </div>
+    </div>
+  `,
+
+  templateForm: `
+    <div class="fade-in">
+      <div class="card">
+        <h3 style="margin-top:0; color: var(--primary-color);">Input Stok ED</h3>
+        
+        <form id="outlet-form" onsubmit="return false;">
+          <!-- Cari Produk -->
+          <div class="form-group">
+            <label>Nama Produk / Kode</label>
+            <input type="text" id="product-search" list="product-list-datalist" 
+                   placeholder="Ketik min. 3 huruf..." 
+                   oninput="App.outlet.onProductInput(this)" required>
+            <datalist id="product-list-datalist"></datalist>
+            <input type="hidden" id="product-code">
+          </div>
+
+          <!-- Info Readonly -->
+          <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>
+              <label>Kode</label>
+              <input type="text" id="display-code" readonly class="readonly-field">
+            </div>
+            <div>
+              <label>Satuan</label>
+              <input type="text" id="display-uom" readonly class="readonly-field">
+            </div>
+          </div>
+
+          <!-- Detail Input -->
+          <div class="form-group">
+            <label>Nomor Batch</label>
+            <input type="text" id="batch-id" placeholder="Contoh: A1234" required>
+          </div>
+
+          <div class="form-group">
+            <label>Tanggal ED</label>
+            <input type="date" id="ed-date" required>
+          </div>
+
+          <div class="form-group">
+            <label>Qty Fisik</label>
+            <input type="number" id="qty" step="0.01" min="0" placeholder="0" required>
+          </div>
+
+          <div class="form-group">
+            <label>Keterangan</label>
+            <textarea id="remark" rows="2" placeholder="Catatan..."></textarea>
+          </div>
+
+          <button type="submit" id="btn-save" class="btn-primary mt-2">Simpan Laporan</button>
+          <button type="button" class="btn-secondary mt-2" onclick="App.outlet.init()">Kembali</button>
+        </form>
+      </div>
+    </div>
+  `,
+
+  // --- LOGIC ---
+
+  init: function() {
+    document.getElementById('main-content').innerHTML = this.templateDashboard;
+    if (this.productList.length === 0) this.loadProducts();
+  },
+
+  loadProducts: function() {
+    google.script.run.withSuccessHandler(data => { this.productList = data; }).getProductMaster();
+  },
+
+  // --- MONITORING 2.0 (ACCORDION UI) ---
+  
+  showMonitoring: function() {
+    document.getElementById('main-content').innerHTML = this.templateMonitoring;
+    
+    google.script.run
+      .withSuccessHandler(data => {
+        this.monitoringData = data;
+        this.renderMonitoring(data);
+      })
+      .withFailureHandler(err => {
+        document.getElementById('monitoring-list').innerHTML = `<div class="text-center" style="color:red;">Error: ${err.message}</div>`;
+      })
+      .getOutletStock(App.state.currentUser.code);
+  },
+
+  getDynamicTitle: function(key) {
+    const today = new Date(2026, 0, 26); 
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"];
+    const getMonthYear = (offset) => {
+      const d = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+      return `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+    };
+
+    switch(key) {
+      case 'bulan_ini': return `ED Bulan Berjalan (${getMonthYear(0)})`;
+      case '1_3_bulan': return `ED 1-3 Bulan (${getMonthYear(1)} - ${getMonthYear(3)})`;
+      case '4_6_bulan': return `ED 4-6 Bulan (${getMonthYear(4)} - ${getMonthYear(6)})`;
+      case '7_12_bulan': return `ED 7-12 Bulan (${getMonthYear(7)} - ${getMonthYear(8)})`; 
+      case 'expired': return `Kedaluwarsa (Lewat)`;
+      default: return 'Lainnya';
+    }
+  },
+
+  renderMonitoring: function(data) {
+    const container = document.getElementById('monitoring-list');
+    if (!data || data.length === 0) {
+      container.innerHTML = '<div class="text-center text-muted" style="padding: 40px;">Belum ada data stok.</div>';
+      return;
+    }
+
+    const groups = {
+      'bulan_ini': { items: [] },
+      '1_3_bulan': { items: [] },
+      '4_6_bulan': { items: [] },
+      '7_12_bulan': { items: [] },
+      'expired': { items: [] },
+      'other': { items: [] }
+    };
+
+    data.forEach(item => {
+      if (groups[item.category]) groups[item.category].items.push(item);
+      else groups['other'].items.push(item);
+    });
+
+    let html = '';
+    Object.keys(groups).forEach(key => {
+      const group = groups[key];
+      if (group.items.length > 0) {
+        const title = this.getDynamicTitle(key);
+        
+        html += `
+          <details class="accordion-group" open>
+            <summary style="padding: 10px; background: #f8f9fa; border: 1px solid #eee; font-weight: bold; cursor: pointer;">
+              ${title} (${group.items.length})
+            </summary>
+            <div style="padding: 10px 0;">
+        `;
+        
+        group.items.forEach(item => {
+          html += `
+            <div class="monitoring-card ${item.status}" data-id="${item.id}" data-pcode="${item.productCode}">
+              <div class="card-header">
+                <div>
+                  <p class="product-name">${item.productName}</p>
+                  <span class="product-code">${item.productCode}</span>
+                </div>
+              </div>
+              <div class="card-body">
+                <div>
+                  <span class="info-label">Batch</span>
+                  <input type="text" class="edit-batch" value="${item.batchId}" onchange="App.outlet.markEdited(this)">
+                </div>
+                <div>
+                  <span class="info-label">Qty</span>
+                  <input type="number" class="edit-qty" value="${item.qty}" step="0.01" onchange="App.outlet.markEdited(this)">
+                </div>
+                <div>
+                  <span class="info-label">Expired Date</span>
+                  <input type="date" class="edit-ed" value="${item.edDateRaw.split('T')[0]}" onchange="App.outlet.markEdited(this)">
+                </div>
+              </div>
+              
+              <div class="card-footer" style="border-top: 1px dashed #eee; margin-top: 8px; padding-top: 8px;">
+                <span class="info-label">Catatan (Outlet)</span>
+                <textarea class="edit-remark" rows="1" placeholder="Tulis catatan..." onchange="App.outlet.markEdited(this)">${item.remark}</textarea>
+              </div>
+
+              ${item.autoRemark ? `
+                <div class="card-footer" style="background: #e7f3ff; padding: 8px; border-radius: 4px; margin-top: 5px;">
+                  <span class="info-label" style="color: var(--primary-color);">📢 Info Pusat:</span>
+                  <span style="font-size: 0.85rem; font-style: italic;">${item.autoRemark}</span>
+                </div>
+              ` : ''}
+            </div>
+          `;
+        });
+
+        html += `</div></details>`;
+      }
+    });
+    
+    container.innerHTML = html;
+  },
+
+  filterMonitoring: function() {
+    const term = document.getElementById('monitoring-search').value.toUpperCase();
+    const filtered = this.monitoringData.filter(item => item.productName.toUpperCase().includes(term));
+    this.renderMonitoring(filtered);
+  },
+
+  markEdited: function(input) {
+    input.closest('.monitoring-card').classList.add('edited');
+    document.getElementById('btn-save-changes').style.display = 'block';
+  },
+
+  saveBulkChanges: function() {
+    const editedCards = document.querySelectorAll('.monitoring-card.edited');
+    if (editedCards.length === 0) return;
+
+    const updates = [];
+    editedCards.forEach(card => {
+      updates.push({
+        id: card.dataset.id,
+        batch_id: card.querySelector('.edit-batch').value.toUpperCase(),
+        qty: card.querySelector('.edit-qty').value,
+        expired_date: card.querySelector('.edit-ed').value,
+        remark: card.querySelector('.edit-remark').value.toUpperCase()
+      });
+    });
+
+    App.showNotification("Menyimpan perubahan...", "loading");
+    
+    google.script.run
+      .withSuccessHandler(res => {
+        App.hideNotification();
+        if (res.success) {
+          App.showNotification("Perubahan tersimpan!", "success");
+          this.showMonitoring(); 
+        } else {
+          App.showNotification("Gagal: " + res.message, "error");
+        }
+      })
+      .bulkUpdateShortEd(updates);
+  },
+
+  // --- CSV FEATURES (BUG FIX 2: PARSER & FORMAT) ---
+  
+  exportCsv: function() {
+    if (this.monitoringData.length === 0) return;
+    
+    let csv = "ID,Product Code,Product Name,Batch,Qty,Expired Date,Catatan Outlet,Auto Remark\n";
+    this.monitoringData.forEach(item => {
+      const name = item.productName.replace(/"/g, '""');
+      const auto = item.autoRemark.replace(/"/g, '""');
+      const edDate = item.edDateRaw.split('T')[0];
+      
+      // FIX: Gunakan Formula Excel ="..." untuk kolom yang rawan
+      const pCodeExcel = `="${item.productCode}"`;
+      const batchExcel = `="${item.batchId.replace(/"/g, '""')}"`; 
+      const edDateExcel = `="${edDate}"`;
+      const remarkExcel = `="${item.remark.replace(/"/g, '""')}"`;
+      
+      csv += `${item.id},${pCodeExcel},"${name}",${batchExcel},${item.qty},${edDateExcel},${remarkExcel},"${auto}"\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Stok_ED_${App.state.currentUser.name}.csv`;
+    a.click();
+  },
+
+  importCsv: function(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const text = e.target.result;
+      const rows = text.split('\n').slice(1); // Skip header
+      const updates = [];
+
+      rows.forEach(row => {
+        if (!row.trim()) return;
+        
+        // BUG FIX 2: Robust CSV Parser
+        // Memisahkan koma, tapi mengabaikan koma di dalam tanda kutip
+        const cols = row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        
+        // Helper untuk membersihkan wrapper Excel Formula (="...") dan kutip ganda
+        const clean = (val) => {
+            if (!val) return '';
+            let s = val.trim();
+            // Hapus wrapper Excel Formula ="..."
+            if (s.startsWith('="') && s.endsWith('"')) {
+                s = s.substring(2, s.length - 1);
+            }
+            // Hapus wrapper CSV standard "..."
+            else if (s.startsWith('"') && s.endsWith('"')) {
+                s = s.substring(1, s.length - 1);
+                s = s.replace(/""/g, '"'); // Unescape double quotes
+            }
+            return s;
+        };
+
+        if (cols.length >= 6) {
+          updates.push({
+            id: clean(cols[0]), 
+            product_code: clean(cols[1]), 
+            outlet_code: App.state.currentUser.code,
+            batch_id: clean(cols[3]).toUpperCase(),
+            qty: clean(cols[4]),
+            expired_date: clean(cols[5]), 
+            remark: clean(cols[6]).toUpperCase() // Sekarang spasi aman
+          });
+        }
+      });
+
+      if (confirm(`Akan mengupdate ${updates.length} data. Lanjutkan?`)) {
+        App.showNotification("Mengupload data...", "loading");
+        google.script.run
+          .withSuccessHandler(res => {
+            App.hideNotification();
+            if (res.success) {
+              App.showNotification(res.message, "success");
+              App.outlet.showMonitoring();
+            } else {
+              App.showNotification(res.message, "error");
+            }
+          })
+          .bulkUpdateShortEd(updates);
+      }
+    };
+    reader.readAsText(file);
+  },
+
+  // --- FORM INPUT ---
+  
+  handleSave: function(e) {
+    e.preventDefault();
+    let payload = {
+      outlet_code: App.state.currentUser.code,
+      user_name: App.state.currentUser.name,
+      product_code: document.getElementById('product-code').value,
+      batch_id: document.getElementById('batch-id').value,
+      expired_date: document.getElementById('ed-date').value,
+      qty: document.getElementById('qty').value,
+      remark: document.getElementById('remark').value
+    };
+
+    if (!payload.product_code) { App.showNotification("Pilih produk valid!", "error"); return; }
+    Object.keys(payload).forEach(key => { if (typeof payload[key] === 'string') payload[key] = payload[key].toUpperCase().trim(); });
+
+    const btn = document.getElementById('btn-save');
+    btn.disabled = true;
+    App.showNotification("Menyimpan data...", "loading");
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        App.hideNotification();
+        if (res.success) {
+          App.showNotification("✅ Data Berhasil Disimpan!", "success");
+          document.getElementById('outlet-form').reset();
+          document.getElementById('product-code').value = "";
+          document.getElementById('display-code').value = "";
+          document.getElementById('display-uom').value = "";
+          document.getElementById('product-search').focus();
+        } else {
+          App.showNotification("Gagal: " + res.message, "error");
+        }
+        btn.disabled = false;
+      })
+      .withFailureHandler((err) => {
+        App.hideNotification();
+        App.showNotification("Error Server: " + err.message, "error");
+        btn.disabled = false;
+      })
+      .saveShortEdReport(payload);
+  },
+
+  // --- SCANNER & AUTOCOMPLETE ---
+  
+  showFormManual: function(prefillProduct = null) {
+    document.getElementById('main-content').innerHTML = this.templateForm;
+    const dataList = document.getElementById('product-list-datalist');
+    this.productList.forEach(p => {
+      const option = document.createElement('option');
+      option.value = p.name;
+      dataList.appendChild(option);
+    });
+    if (prefillProduct) this.fillProductInfo(prefillProduct);
+    document.getElementById('outlet-form').addEventListener('submit', this.handleSave.bind(this));
+  },
+
+  onProductInput: function(input) {
+    const val = input.value.toUpperCase().trim();
+    const product = this.productList.find(p => (p.name && p.name.toUpperCase() === val) || (p.code && p.code.toUpperCase() === val));
+    if (product) this.fillProductInfo(product);
+    else { document.getElementById('product-code').value = ""; document.getElementById('display-code').value = ""; document.getElementById('display-uom').value = ""; }
+  },
+
+  fillProductInfo: function(product) {
+    document.getElementById('product-search').value = product.name;
+    document.getElementById('product-code').value = product.code;
+    document.getElementById('display-code').value = product.barcode || product.code;
+    document.getElementById('display-uom').value = product.uom;
+    document.getElementById('batch-id').focus();
+  },
+
+  handleScanClick: function() { this.isMobile ? this.showCameraScanner() : this.showHardwareScanner(); },
+  
+  showCameraScanner: function() { 
+    document.getElementById('main-content').innerHTML = this.templateCamera;
+    this.codeReader = new ZXing.BrowserMultiFormatReader();
+    this.codeReader.decodeFromVideoDevice(null, 'video-preview', (res) => { if(res) this.handleScanResult(res.text); });
+  },
+
+  showHardwareScanner: function() {
+    document.getElementById('main-content').innerHTML = this.templateHardwareScan;
+    const input = document.getElementById('hardware-input'); input.focus();
+    input.addEventListener('change', (e) => { if(e.target.value) this.handleScanResult(e.target.value.trim()); e.target.value=""; });
+    document.addEventListener('click', () => input.focus());
+  },
+
+  handleScanResult: function(barcode) {
+    if(this.codeReader) this.codeReader.reset();
+    const bcUpper = barcode.toUpperCase();
+    const product = this.productList.find(p => (p.barcode && p.barcode.toUpperCase() === bcUpper) || (p.code && p.code.toUpperCase() === bcUpper));
+    if(product) { App.showNotification("Ditemukan!", "success"); this.showFormManual(product); }
+    else { App.showNotification("Tidak ditemukan.", "error"); this.showFormManual(); }
+  }
+};
+</script>

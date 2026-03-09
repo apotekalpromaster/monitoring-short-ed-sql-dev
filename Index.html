@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <!-- Viewport wajib untuk Mobile-First yang responsif -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Alpro Short ED 2.0</title>
+    
+    <!-- External Libraries -->
+    <!-- Google Charts untuk Dashboard (Phase 3) -->
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <!-- ZXing untuk Barcode Scanner -->
+    <script type="text/javascript" src="https://unpkg.com/@zxing/library@latest"></script>
+
+    <!-- Memuat CSS Modular -->
+    <?!= include('AppStyle'); ?>
+  </head>
+  <body>
+    
+    <!-- Container Utama Aplikasi (App Shell) -->
+    <div id="app-shell">
+      <!-- Header Sederhana -->
+      <header class="app-header">
+        <div class="header-content">
+          <span class="brand-logo">Alpro Short ED</span>
+          <!-- User Badge bisa diaktifkan lewat JS nanti -->
+          <span id="user-badge" class="user-badge" style="display:none; font-size: 0.8em; background: rgba(255,255,255,0.2); padding: 4px 8px; border-radius: 4px;">Guest</span>
+        </div>
+      </header>
+
+      <!-- Area Konten Dinamis (Halaman akan dirender di sini) -->
+      <main id="main-content" class="container">
+        <!-- Loading Spinner Awal -->
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <p>Memuat Aplikasi...</p>
+        </div>
+      </main>
+
+      <!-- Footer Global -->
+      <footer class="app-footer">
+        <p style="margin: 0;">Alpro Short ED v2.0</p>
+        <p style="margin: 0;">&copy; 2026 OASIS Apotek Alpro Indonesia</p>
+      </footer>
+    </div>
+
+    <!-- Container untuk Notifikasi Melayang (Toast) -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- 1. Memuat Modul-Modul Fitur Terlebih Dahulu -->
+    <!-- Urutan penting: Modul fitur dulu, baru Main logic -->
+    <?!= include('Login'); ?>
+    <?!= include('Outlet'); ?>
+    
+    <!-- Modul Dashboard AM (Baru) -->
+    <?!= include('DashboardAM'); ?>
+
+    <!-- Modul Dashboard Procurement (Baru) -->
+    <?!= include('DashboardProc'); ?>   
+
+    <!-- 2. Memuat Logika Utama (Router & State) -->
+    <?!= include('Main'); ?>
+    
+  </body>
+</html>

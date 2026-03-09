@@ -1,0 +1,102 @@
+<script>
+  /**
+   * Main.html (Updated Phase 2.2)
+   * Core Frontend Logic, Router, & Menu Navigation
+   */
+  
+  const CONFIG_VERSION = "2.2.0";
+  var App = App || {}; 
+
+  App.state = { currentUser: null, isLoading: false };
+
+  App.init = function() {
+    console.log("App Initialized v" + CONFIG_VERSION);
+    if (App.login) App.login.init();
+    else document.getElementById('main-content').innerHTML = "<p>Error: Modul Login tidak ditemukan.</p>";
+  };
+
+  // Sistem Notifikasi (Toast) - Updated
+  App.showNotification = function(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    // Hapus notifikasi loading sebelumnya jika ada
+    if (type === 'loading') App.hideNotification();
+
+    const toast = document.createElement('div');
+    toast.className = `toast-notification ${type}`;
+    
+    if (type === 'loading') {
+      toast.innerHTML = `<div class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:10px;"></div> ${message}`;
+      toast.id = 'loading-toast'; // ID khusus untuk loading
+    } else {
+      toast.textContent = message;
+    }
+    
+    container.appendChild(toast);
+
+    if (type !== 'loading') {
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+    return toast;
+  };
+
+  // Fungsi Baru: Sembunyikan Notifikasi Loading
+  App.hideNotification = function() {
+    const loadingToast = document.getElementById('loading-toast');
+    if (loadingToast) loadingToast.remove();
+  };
+
+  // --- MENU NAVIGATION (UPDATED PHASE 2.2) ---
+  App.menu = {
+    init: function() {
+      const user = App.state.currentUser;
+      if (!user) { App.init(); return; }
+
+      const badge = document.getElementById('user-badge');
+      if (badge) { badge.textContent = user.name; badge.style.display = 'inline-block'; }
+
+      // 1. Role Outlet
+      if (user.role === 'OUTLET') {
+        if (App.outlet && App.outlet.init) App.outlet.init(); 
+        return;
+      }
+
+      // 2. Role Area Manager (AM)
+      if (user.role === 'AM') {
+        if (App.am && App.am.init) App.am.init();
+        else document.getElementById('main-content').innerHTML = "<p>Modul AM belum dimuat.</p>";
+        return;
+      }
+
+      // 3. Role Procurement (PROC)
+      if (user.role === 'PROCUREMENT' || user.role === 'PROC') {
+        if (App.proc && App.proc.init) App.proc.init();
+        else document.getElementById('main-content').innerHTML = "<p>Modul Procurement belum dimuat.</p>";
+        return;
+      }
+
+      // 4. Role Lain (BOD)
+      const html = `
+        <div class="fade-in">
+          <div class="card">
+            <h3>Halo, ${user.name}</h3>
+            <p class="text-muted">Role: <strong>${user.role}</strong></p>
+            <hr>
+            <div class="text-center" style="padding: 40px;">
+              <h3>Dashboard Management</h3>
+              <p class="text-muted">Dashboard BOD akan hadir di Phase 3.</p>
+            </div>
+            <button class="btn-secondary mt-2" onclick="location.reload()">Keluar</button>
+          </div>
+        </div>
+      `;
+      document.getElementById('main-content').innerHTML = html;
+    }
+  };
+
+  document.addEventListener('DOMContentLoaded', App.init);
+</script>

@@ -1,0 +1,262 @@
+<script>
+/**
+ * DashboardAM.html
+ * Dashboard khusus Area Manager - Dynamic Filtering Version.
+ */
+
+var App = App || {};
+
+App.am = {
+  rawData: [], // Array of Outlet Data Objects
+
+  template: `
+    <div class="fade-in">
+      <div class="card-header-actions" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2 style="color: var(--primary-color); margin: 0;">Dashboard Area Manager</h2>
+        <div class="form-group" style="margin: 0; width: 250px;">
+          <select id="am-outlet-filter" onchange="App.am.filterDashboard()" style="padding: 8px;">
+            <option value="ALL">Semua Apotek</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- KPI CARDS (DYNAMIC) -->
+      <div class="kpi-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 25px;">
+        <div class="kpi-card monitoring-card urgent-high">
+          <p class="kpi-title">Total Nilai Risiko</p>
+          <h3 id="kpi-risk-value" class="kpi-value">Rp 0</h3>
+          <small>Jan '26 - Sept '26</small>
+        </div>
+        <div class="kpi-card monitoring-card urgent-medium">
+          <p class="kpi-title">Jumlah SKU Berisiko</p>
+          <h3 id="kpi-sku-count" class="kpi-value">0</h3>
+          <small>Item Unik</small>
+        </div>
+        <div class="kpi-card monitoring-card urgent-low">
+          <p class="kpi-title">Apotek Terdampak</p>
+          <h3 id="kpi-outlet-count" class="kpi-value">0</h3>
+          <small id="kpi-outlet-label">Dari total area</small>
+        </div>
+        <div class="kpi-card monitoring-card expired">
+          <p class="kpi-title">Produk ED Terkumpul</p>
+          <h3 id="kpi-expired-value" class="kpi-value" style="color: #6c757d;">Rp 0</h3>
+          <small>Sept '25 - Des '25</small>
+        </div>
+      </div>
+
+      <!-- CHARTS -->
+      <div class="dashboard-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px;">
+        <div class="card">
+          <h4>Distribusi Risiko (Berdasarkan Nilai)</h4>
+          <div id="chart-pie" style="width: 100%; height: 300px;"></div>
+        </div>
+        <div class="card">
+          <h4>Top 5 Produk Berisiko (Rp)</h4>
+          <div id="chart-bar" style="width: 100%; height: 300px;"></div>
+        </div>
+      </div>
+
+      <!-- TABLE -->
+      <div class="card">
+        <h4>Peringkat Apotek Berisiko</h4>
+        <div style="overflow-x: auto;">
+          <table class="monitoring-table" style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background: #f8f9fa; text-align: left;">
+                <th style="padding: 12px; border-bottom: 2px solid #dee2e6;">Nama Apotek</th>
+                <th style="padding: 12px; border-bottom: 2px solid #dee2e6;">Jml SKU</th>
+                <th style="padding: 12px; border-bottom: 2px solid #dee2e6;">Total Nilai (Rp)</th>
+                <th style="padding: 12px; border-bottom: 2px solid #dee2e6;">Status</th>
+              </tr>
+            </thead>
+            <tbody id="table-outlet-body">
+              <tr><td colspan="4" class="text-center">Memuat data...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      <div style="margin-top: 20px; text-align: center;">
+        <button class="btn-secondary" style="width: auto;" onclick="location.reload()">Keluar / Ganti Akun</button>
+      </div>
+    </div>
+  `,
+
+  init: function() {
+    document.getElementById('main-content').innerHTML = this.template;
+    google.charts.load('current', {'packages':['corechart']});
+    google.charts.setOnLoadCallback(() => { this.fetchData(); });
+  },
+
+  fetchData: function() {
+    App.showNotification("Memuat data area...", "loading");
+    const user = App.state.currentUser;
+
+    google.script.run
+      .withSuccessHandler(res => {
+        App.hideNotification();
+        if (res.error) { App.showNotification(res.error, "error"); return; }
+        
+        this.rawData = res.data; // Array of Outlet Objects
+        this.populateFilter(res.filterList);
+        this.calculateAndRender('ALL'); // Render Global Default
+      })
+      .withFailureHandler(err => {
+        App.hideNotification();
+        App.showNotification("Gagal: " + err.message, "error");
+      })
+      .getAMDashboardData(user.name);
+  },
+
+  populateFilter: function(list) {
+    const select = document.getElementById('am-outlet-filter');
+    list.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      select.appendChild(opt);
+    });
+  },
+
+  filterDashboard: function() {
+    const selected = document.getElementById('am-outlet-filter').value;
+    this.calculateAndRender(selected);
+  },
+
+  // LOGIKA AGREGASI CLIENT-SIDE
+  calculateAndRender: function(filterName) {
+    let dataToProcess = [];
+    
+    if (filterName === 'ALL') {
+      dataToProcess = this.rawData;
+    } else {
+      dataToProcess = this.rawData.filter(d => d.name === filterName);
+    }
+
+    // 1. Hitung KPI
+    let totalRisk = 0;
+    let totalExpired = 0;
+    let totalSku = 0; // Note: Ini sum of SKU counts, bukan unique SKU global (karena keterbatasan data raw)
+    let affectedOutlets = 0;
+    
+    // 2. Hitung Distribusi
+    let dist = { 'bulan_ini': 0, '1_3_bulan': 0, '4_6_bulan': 0, '7_12_bulan': 0 };
+    
+    // 3. Hitung Top Products
+    let productMap = {};
+
+    dataToProcess.forEach(d => {
+      totalRisk += d.riskValue;
+      totalExpired += d.expiredValue;
+      totalSku += d.skuCount;
+      if (d.riskValue > 0) affectedOutlets++;
+
+      // Sum Distribution
+      Object.keys(dist).forEach(k => dist[k] += (d.distribution[k] || 0));
+
+      // Sum Products
+      d.topProducts.forEach(p => {
+        if (!productMap[p.name]) productMap[p.name] = 0;
+        productMap[p.name] += p.value;
+      });
+    });
+
+    // 4. Render KPI
+    const fmt = (num) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num);
+    document.getElementById('kpi-risk-value').textContent = fmt(totalRisk);
+    document.getElementById('kpi-sku-count').textContent = totalSku;
+    document.getElementById('kpi-expired-value').textContent = fmt(totalExpired);
+    
+    if (filterName === 'ALL') {
+      document.getElementById('kpi-outlet-count').textContent = affectedOutlets;
+      document.getElementById('kpi-outlet-label').textContent = "Dari total area";
+    } else {
+      document.getElementById('kpi-outlet-count').textContent = affectedOutlets > 0 ? "1" : "0";
+      document.getElementById('kpi-outlet-label').textContent = "Outlet terpilih";
+    }
+
+    // 5. Render Charts
+    this.drawPieChart(dist);
+    
+    const sortedProducts = Object.entries(productMap)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 5)
+      .map(([n, v]) => ({ name: n, value: v }));
+    this.drawBarChart(sortedProducts);
+
+    // 6. Render Table (Selalu tampilkan semua, tapi highlight yang dipilih jika filter aktif)
+    // Atau tampilkan hanya yang difilter? Sesuai instruksi sebelumnya: "Tabel hanya menampilkan 1 baris"
+    this.renderTable(dataToProcess);
+  },
+
+  renderTable: function(outlets) {
+    const tbody = document.getElementById('table-outlet-body');
+    const fmt = (num) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num);
+    
+    // Sort descending by risk value
+    const sorted = outlets.sort((a, b) => b.riskValue - a.riskValue);
+
+    if (sorted.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-center">Tidak ada data.</td></tr>';
+      return;
+    }
+
+    let html = '';
+    sorted.forEach(o => {
+      let statusBadge = '<span class="status-badge" style="background: #28a745;">Aman</span>';
+      if (o.riskValue > 10000000) statusBadge = '<span class="status-badge" style="background: #dc3545;">Kritis</span>';
+      else if (o.riskValue > 5000000) statusBadge = '<span class="status-badge" style="background: #ffc107; color: #000;">Waspada</span>';
+
+      html += `
+        <tr>
+          <td style="padding: 12px; border-bottom: 1px solid #eee;"><b>${o.name}</b></td>
+          <td style="padding: 12px; border-bottom: 1px solid #eee;">${o.skuCount}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #eee;">${fmt(o.riskValue)}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #eee;">${statusBadge}</td>
+        </tr>
+      `;
+    });
+    tbody.innerHTML = html;
+  },
+
+  drawPieChart: function(dist) {
+    const data = google.visualization.arrayToDataTable([
+      ['Kategori', 'Nilai (Rp)'],
+      ['Bulan Berjalan', dist['bulan_ini']],
+      ['1-3 Bulan', dist['1_3_bulan']],
+      ['4-6 Bulan', dist['4_6_bulan']],
+      ['7-12 Bulan', dist['7_12_bulan']]
+    ]);
+
+    const options = {
+      title: '',
+      pieHole: 0.4,
+      colors: ['#dc3545', '#fd7e14', '#ffc107', '#28a745'],
+      chartArea: {width: '90%', height: '80%'},
+      legend: {position: 'bottom'}
+    };
+
+    const chart = new google.visualization.PieChart(document.getElementById('chart-pie'));
+    chart.draw(data, options);
+  },
+
+  drawBarChart: function(products) {
+    const chartData = [['Produk', 'Nilai (Rp)', { role: 'style' }]];
+    products.forEach(p => {
+      chartData.push([p.name, p.value, '#0056b3']);
+    });
+
+    const data = google.visualization.arrayToDataTable(chartData);
+    const options = {
+      title: '',
+      legend: { position: "none" },
+      chartArea: {width: '70%', height: '80%'},
+      hAxis: { title: 'Total Rupiah' },
+      vAxis: { textStyle: { fontSize: 10 } }
+    };
+
+    const chart = new google.visualization.BarChart(document.getElementById('chart-bar'));
+    chart.draw(data, options);
+  }
+};
+</script>

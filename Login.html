@@ -1,0 +1,213 @@
+<script>
+/**
+ * Login.html (Full Version Phase 2)
+ * Menangani tampilan, logika login, dan transisi ke Menu Utama.
+ */
+
+var App = App || {};
+
+App.login = {
+  // Cache daftar toko (No Password)
+  outletList: [],
+  // Cache daftar user lain (Need Password)
+  otherList: [],
+
+  template: `
+    <div class="login-container fade-in" style="display: flex; flex-direction: column; min-height: 80vh;">
+      <div class="card login-card" style="flex: 1; max-height: fit-content;">
+        <h2 class="text-center" style="margin-bottom: 20px; color: var(--primary-color);">Masuk Aplikasi</h2>
+        
+        <form id="login-form" onsubmit="return false;">
+          <!-- USERNAME INPUT -->
+          <div class="form-group">
+            <label for="username">Nama Pengguna / Toko</label>
+            <input type="text" id="username" list="login-datalist" 
+                   placeholder="Ketik nama toko..." autocomplete="off" required
+                   style="text-transform: uppercase;" oninput="App.login.checkPasswordRequirement()">
+            <datalist id="login-datalist"></datalist>
+          </div>
+
+          <!-- PASSWORD INPUT (Dynamic Visibility) -->
+          <div class="form-group" id="password-group">
+            <label for="password">Kata Sandi</label>
+            <div style="position: relative;">
+              <input type="password" id="password" placeholder="Masukkan kata sandi" 
+                     style="padding-right: 40px; text-transform: uppercase;">
+              
+              <!-- SVG Icon Toggle -->
+              <span id="toggle-pass" onclick="App.login.togglePassword()" 
+                    style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; color: var(--secondary-color); display: flex;">
+                <!-- Icon Eye (Visible) -->
+                <svg id="icon-eye" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                <!-- Icon Eye Off (Hidden) -->
+                <svg id="icon-eye-off" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+              </span>
+            </div>
+            <small id="pass-hint" class="text-muted" style="font-size: 0.8em; display: block; margin-top: 5px;">
+              *Area Manager / BOD / Procurement wajib isi sandi.
+            </small>
+          </div>
+
+          <button type="submit" id="btn-login" class="btn-primary mt-2">
+            Masuk
+          </button>
+        </form>
+        
+        <div id="login-alert" class="toast-notification error mt-2" style="display: none;"></div>
+      </div>
+      
+      <!-- FOOTER -->
+      <div class="text-center mt-2" style="padding: 20px 0; color: var(--text-muted); font-size: 0.75rem; border-top: 1px solid #eee;">
+        <p style="margin: 0;">Alpro Short ED v2.0</p>
+        <p style="margin: 0;">&copy; 2026 OASIS Apotek Alpro Indonesia</p>
+      </div>
+    </div>
+  `,
+
+  init: function() {
+    console.log("Login Module Initialized");
+    const mainContent = document.getElementById('main-content');
+    if (mainContent) mainContent.innerHTML = this.template;
+
+    this.loadLoginOptions();
+
+    const form = document.getElementById('login-form');
+    if (form) form.addEventListener('submit', this.handleLogin.bind(this));
+  },
+
+  loadLoginOptions: function() {
+    const input = document.getElementById('username');
+    if (!input) return;
+    input.placeholder = "Memuat daftar toko...";
+    input.disabled = true;
+
+    google.script.run
+      .withSuccessHandler((data) => {
+        // Data berupa object { outlets: [], others: [] }
+        this.outletList = data.outlets || [];
+        this.otherList = data.others || [];
+
+        const dataList = document.getElementById('login-datalist');
+        if (dataList) {
+          dataList.innerHTML = '';
+          
+          // Gabungkan semua opsi untuk Autocomplete
+          const allOptions = [...this.outletList, ...this.otherList].sort();
+          
+          allOptions.forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt;
+            dataList.appendChild(option);
+          });
+        }
+        input.placeholder = "Ketik nama toko...";
+        input.disabled = false;
+        input.focus();
+      })
+      .withFailureHandler((err) => {
+        console.error("Gagal memuat opsi login", err);
+        input.placeholder = "Gagal memuat data. Ketik manual.";
+        input.disabled = false;
+      })
+      .getLoginOptions();
+  },
+
+  // Logika Dinamis: Hanya sembunyikan password jika user ada di outletList
+  checkPasswordRequirement: function() {
+    const input = document.getElementById('username');
+    const passGroup = document.getElementById('password-group');
+    const passInput = document.getElementById('password');
+    
+    const val = input.value.toUpperCase().trim();
+    
+    // Cek apakah input ada di daftar Outlet (yang login tanpa password)
+    const isOutlet = this.outletList.includes(val);
+    
+    if (isOutlet) {
+      // Jika Outlet: Sembunyikan password
+      passGroup.style.display = 'none';
+      passInput.required = false;
+      passInput.value = ''; 
+    } else {
+      // Jika AM, BOD, Procurement, atau Typo: Tampilkan password
+      passGroup.style.display = 'block';
+      passInput.required = true;
+    }
+  },
+
+  handleLogin: function(e) {
+    e.preventDefault();
+    
+    // Paksa Uppercase untuk Username DAN Password
+    const user = document.getElementById('username').value.toUpperCase().trim();
+    const passRaw = document.getElementById('password').value;
+    const pass = passRaw ? passRaw.trim().toUpperCase() : "";
+
+    const btn = document.getElementById('btn-login');
+    const alertBox = document.getElementById('login-alert');
+
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px; display: inline-block; vertical-align: middle; margin-right: 8px;"></div> Memproses...';
+    alertBox.style.display = 'none';
+
+    google.script.run
+      .withSuccessHandler((response) => {
+        if (response.success) {
+          // 1. Simpan User ke State Global
+          if (App && App.state) {
+            App.state.currentUser = response.user;
+          }
+
+          // 2. Tampilkan Notifikasi Sukses
+          if (App.showNotification) {
+            App.showNotification(`Selamat datang, ${response.user.name}`, 'success');
+          }
+          
+          // 3. Pindah ke Menu Utama
+          if (App.menu && App.menu.init) {
+            App.menu.init();
+          } else {
+            // Fallback jika modul menu belum siap
+            document.getElementById('main-content').innerHTML = `
+              <div class="text-center fade-in" style="padding: 50px;">
+                <h2 style="color: var(--success-color);">Login Berhasil!</h2>
+                <p>Memuat Menu...</p>
+              </div>
+            `;
+          }
+
+        } else {
+          // Login Gagal
+          alertBox.textContent = response.message;
+          alertBox.style.display = 'flex';
+          btn.disabled = false;
+          btn.textContent = 'Masuk';
+        }
+      })
+      .withFailureHandler((err) => {
+        // Error Server
+        alertBox.textContent = "Error Server: " + err.message;
+        alertBox.style.display = 'flex';
+        btn.disabled = false;
+        btn.textContent = 'Masuk';
+      })
+      .validateLogin(user, pass);
+  },
+
+  togglePassword: function() {
+    const input = document.getElementById('password');
+    const iconEye = document.getElementById('icon-eye');
+    const iconEyeOff = document.getElementById('icon-eye-off');
+    
+    if (input.type === "password") {
+      input.type = "text";
+      iconEye.style.display = 'none';
+      iconEyeOff.style.display = 'block';
+    } else {
+      input.type = "password";
+      iconEye.style.display = 'block';
+      iconEyeOff.style.display = 'none';
+    }
+  }
+};
+</script>
